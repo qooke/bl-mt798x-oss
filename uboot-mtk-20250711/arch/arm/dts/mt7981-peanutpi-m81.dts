@@ -43,8 +43,8 @@
 	tick_dly = <2>;
 	sample_sel = <0>;
 
-	spi_nand@0 {
-		compatible = "spi-nand";
+	spi_nor@0 {
+		compatible = "spi-nor";
 		reg = <0>;
 		spi-max-frequency = <52000000>;
 	};
