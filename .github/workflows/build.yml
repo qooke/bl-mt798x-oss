@@ -1,0 +1,75 @@
+name: Build BL2 and FIP
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  determine_targets:
+    name: Determine Build targets
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.target.outputs.target }}
+
+    steps:
+      - name: Checkout source tree
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: '0'
+
+      - name: Build target
+        id: target
+        run: |
+          COMMIT="$(git log --pretty=format:"%H" -1 uboot-mtk-*/configs)"
+          CONFIGS="$(git show --name-only "$COMMIT" | awk -F '/' '/^uboot.*defconfig$/ {printf "\"%s\",", $NF}' | sed 's/,$//')"
+          JSON_LIST="{\"runner\": [\"ubuntu-latest\"],\"target\": [$CONFIGS]}"
+          echo "$JSON_LIST" | jq .
+          echo "target=$JSON_LIST" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: determine_targets
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix: ${{ fromJson(needs.determine_targets.outputs.target) }}
+      fail-fast: false
+      max-parallel: 15
+
+    steps:
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+         sudo apt-get update
+         
+         sudo apt-get install -y \
+           gcc-aarch64-linux-gnu \
+           build-essential \
+           flex \
+           bison \
+           libssl-dev \
+           libgnutls28-dev \
+           uuid-dev \
+           swig \
+           python3-dev \
+           device-tree-compiler
+      - name: Checkout source tree
+        uses: actions/checkout@v5
+
+      - name: Build BL2 and FIP
+        env:
+          CONFIG: ${{ matrix.target }}
+        run: |
+          export SOC="${CONFIG%%_*}"
+          BOARD="${CONFIG#*_}"
+          export BOARD="${BOARD%_*}"
+          mkdir -p "output"
+          ./build.sh 2>&1 | tee "output/build.log"
+          sha256sum "output"/* | sed "s|output/||" > "output/sha256sums"
+          echo "ARTIFACT_NAME=$SOC-$BOARD" >> "$GITHUB_ENV"
+
+      - name: Upload build outputs
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: output/*
